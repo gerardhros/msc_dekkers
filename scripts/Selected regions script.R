@@ -4,10 +4,6 @@
 require(sf)
 require(dplyr)
 
-# Transform coordinates to sf
-lgw <- st_as_sf(gw.loc, coords = c("mtp_x", "mtp_y"), crs = 28992)
-lsw <- st_as_sf(sw.loc, coords = c("mtp_x", "mtp_y"), crs = 28992)
-
 # Read the spatial layers with polygon regions 
 wur_regions <- st_read("ws_wur_selection_waterlichaamgebieden (1).gpkg")
 agv_regions <- st_read("ws_agv_selection (1).gpkg")
@@ -88,6 +84,9 @@ gw_counts <- gw_in_regions %>%
   group_by(grouped_name) %>%
   summarise(count = n())
 View(gw_counts)
+
+# Read province polygons
+
 
 ### Make plots for visualization
 

@@ -13,16 +13,56 @@
 # Clean memory
 rm(list = ls() )
 
-# Load packages
-require(gstat); require(data.table); require(sf)
-library(MASS)
+getwd()
 
+# Load packages
+require(gstat); require(data.table); require(sf); require(readxl); require(MASS)
 
 ## Make a data table of location and chemical data --------------
 
+## Grondwaterkwaliteit locaties. Every location file has another header, so make a new dt with consistent headers
 
-# Every location file has another header, so make a new dt with consitent headers
-loc.files <- list.files(path = "C:/Users/Tldek/Documents/MES/MSc Thesis/Water quality data/Meetlocaties/", pattern = ".csv$", full.names = TRUE)
+
+# Read the Excel file
+loc.gw <- read_excel("meetlocatiebestand_WKP_koppeling_meetgegevens_20181207-corr20210519_aanvulling_provincies.xlsx", sheet = 1)
+
+# Convert to data.table
+loc.gw <- as.data.table(loc.gw)
+View(loc.gw)
+
+# Rename columns
+colnames(loc.gw) <- tolower(colnames(loc.gw))
+setnames(loc.gw, old = c("nitgnummer + filter", "krwlocatienaam", "x", "y"),
+         new = c("mtp_naam", "mtp_id", "mtp_x", "mtp_y"))
+
+gw.loc <- data.table(
+  mtp_naam = loc.gw[["mtp_naam"]],
+  mtp_id   = loc.gw[["mtp_id"]],
+  mtp_x    = loc.gw[["mtp_x"]],
+  mtp_y    = loc.gw[["mtp_y"]]
+)
+
+View(gw.loc)
+
+# remove characters from coordinate, and convert to numeric
+gw.loc[, mtp_x := as.numeric((gsub("[^0-9\\.]", "", mtp_x)))]
+gw.loc[, mtp_y := as.numeric(gsub("[^0-9\\.]", "", mtp_y))]
+
+# remove records for which x- and/or y-coordinate is empty or 0
+gw.loc <- gw.loc[!is.na(mtp_x) & mtp_x > 0 & mtp_x != "",]
+gw.loc <- gw.loc[!is.na(mtp_y) & mtp_y > 0 & mtp_y != "",]
+
+# remove records which largely exceeds the RD range of NL
+gw.loc <- gw.loc[mtp_x > 10000 & mtp_x < 300000, ]
+gw.loc <- gw.loc[mtp_y > 300000 & mtp_y < 650000, ]
+
+gw.loc$mtp_id <- gsub("'", '', gw.loc$mtp_id)
+gw.loc$mtp_id <- gsub("\"", '', gw.loc$mtp_id)
+gw.loc <- unique(gw.loc, by = "mtp_id")
+View(gw.loc)
+
+# Oppervlaktewater locaties. Every location file has another header, so make a new dt with consistent headers
+loc.files <- list.files(path = "Water quality data/Meetlocaties/", pattern = ".csv$", full.names = TRUE)
 locs <- list()
 for (file in loc.files) {
   
@@ -47,7 +87,6 @@ for (file in loc.files) {
   # Add the result to the list
   locs[[file]] <- new.file
   
-  
   # remove characters from coordinate, and convert to numeric
   new.file[, mtp_x := as.numeric((gsub("[^0-9\\.]", "", mtp_x)))]
   new.file[, mtp_y := as.numeric(gsub("[^0-9\\.]", "", mtp_y))]
@@ -69,10 +108,76 @@ dt.loc$mtp_id <- gsub("'", '', dt.loc$mtp_id)
 dt.loc$mtp_id <- gsub("\"", '', dt.loc$mtp_id)
 dt.loc <- unique(dt.loc, by = "mtp_id")
 
+# Transform coordinates to sf
+sw.loc <- copy(dt.loc)
+
+lgw <- st_as_sf(gw.loc, coords = c("mtp_x", "mtp_y"), crs = 28992)
+lsw <- st_as_sf(sw.loc, coords = c("mtp_x", "mtp_y"), crs = 28992)
+
+st_write(lgw, "gw.coords.gpkg")
+st_write(lsw, "sw.coords.gpkg")
+
+fwrite(dt.loc, file= "sw.coordinates.csv")
+fwrite(gw.loc, file = "gw.coordinates.csv")
 
 
-# Every chemie file has another header, so make new dt with consistent headers
-chemie.files <- list.files(path = "C:/Users/Tldek/Documents/MES/MSc Thesis/Water quality data/Oppervlaktewater", pattern = '.csv$', full.names = TRUE)
+
+# Grondwater chemie. Every chemie file has another header, so make new dt with consistent headers
+
+chemie.files.gw <- list.files(path = "Water quality data/Grondwater", pattern = '.csv$', full.names = TRUE)
+chemie.gw <- list()
+for (file in chemie.files.gw) {
+  
+  this.file <- fread(file, fill = TRUE)
+  
+  colnames(this.file) <- tolower(colnames(this.file))
+  
+  mtp_naam.index <- which(colnames(this.file) %in% c("meetobject.namespace", "namespace")) [1]
+  mtp_id.index <- which(colnames(this.file) %in% c("meetpunt.lokaalid", "monsteridentificatie")) [1]
+  mtp_compartiment.index  <- which(colnames(this.file) %in% c("analysecompartiment.omschrijving", "compartimentcode")) [1]
+  mtp_parameter.index <- which(colnames(this.file) %in% c("parameter.omschrijving", "parametercode")) [1]
+  mtp_waarde.index <- which(colnames(this.file) %in% c("numeriekewaarde")) [1]
+  mtp_eenheid.index <- which(colnames(this.file) %in% c("eenheid.code", "eenheidcode")) [1]
+  mtp_datum.index <- which(colnames(this.file) %in% c("begindatum")) [1]
+  mtp_tijd.index <- which(colnames(this.file) %in% c("begintijd")) [1]
+  
+  
+  new.file <- data.table(mtp_naam = this.file[, ..mtp_naam.index],
+                         mtp_compartiment = this.file[, ..mtp_compartiment.index],
+                         mtp_id = this.file[, ..mtp_id.index],
+                         mtp_parameter = this.file[, ..mtp_parameter.index],
+                         mtp_waarde = this.file[, ..mtp_waarde.index],
+                         mtp_eenheid = this.file[, ..mtp_eenheid.index],
+                         mtp_datum = this.file[, ..mtp_datum.index],
+                         mtp_tijd = this.file[, ..mtp_tijd.index])
+  setnames(new.file,
+           colnames(new.file),
+           c("mtp_naam", "mtp_compartiment", "mtp_id", "mtp_parameter", "mtp_waarde", "mtp_eenheid", "mtp_datum", "mtp_tijd"))
+  
+  chemie.gw[[file]] <- new.file
+  
+}
+
+dt.chemie.gw <- rbindlist(chemie.gw, fill = TRUE)
+# dt.chemie.gw <- dt.chemie.gw[grep("opp|Opp", mtp_compartiment)][, mtp_compartiment := NULL]
+dt.chemie.gw$mtp_id <- gsub("'", '', dt.chemie.gw$mtp_id)
+dt.chemie.gw$mtp_id <- gsub("\"", '', dt.chemie.gw$mtp_id)
+dt.chemie.gw$mtp_datum <- as.Date(dt.chemie.gw$mtp_datum)
+View(dt.chemie.gw)
+
+# # merge XY coordinate into chemistry data table
+# dt.gw <- merge(dt.chemie.gw, gw.loc, by = c("mtp_id"))
+# dt.gw$mtp_naam.y <- NULL
+# setnames(dt.gw, c("mtp_naam.x"), "mtp_naam")
+# View(dt.gw)
+# 
+# # temp # check number of unique ID (with valid xy coordinate) per year
+# dt.gw[, lapply(.SD, function(x) length(unique(x))), .SDcols = "mtp_id", by = year(mtp_datum)]
+
+
+
+# Oppervlaktewater chemie. Every chemie file has another header, so make new dt with consistent headers
+chemie.files <- list.files(path = "Water quality data/Oppervlaktewater", pattern = '.csv$', full.names = TRUE)
 chemie <- list()
 for (file in chemie.files) {
   
@@ -105,7 +210,7 @@ for (file in chemie.files) {
                          mtp_eenheid = this.file[, ..mtp_eenheid.index],
                          mtp_datum = this.file[, ..mtp_datum.index],
                          mtp_tijd = this.file[, ..mtp_tijd.index])
-  setnames(new.file, 
+  setnames(new.file,
            colnames(new.file),
            c("mtp_naam", "mtp_compartiment", "mtp_id", "mtp_parameter", "mtp_waarde", "mtp_eenheid", "mtp_datum", "mtp_tijd"))
   
@@ -113,12 +218,7 @@ for (file in chemie.files) {
   
 }
 
-
-# Set names and add to list
-setnames(new.file, colnames(new.file), c("mtp_naam", "mtp_compartiment", "mtp_id", "mtp_parameter", "mtp_waarde", "mtp_eenheid", "mtp_datum", "mtp_tijd"))
-chemie[[file]] <- new.file
-
-dt.chemie <- rbindlist(chemie)
+dt.chemie <- rbindlist(chemie, fill = TRUE)
 dt.chemie <- dt.chemie[grep("opp|Opp", mtp_compartiment)][, mtp_compartiment := NULL]
 dt.chemie$mtp_id <- gsub("'", '', dt.chemie$mtp_id)
 dt.chemie$mtp_id <- gsub("\"", '', dt.chemie$mtp_id)
@@ -190,16 +290,52 @@ dt.n <- dt.n[mtp_x != "" & mtp_x != 0]
 dt.n[is.na(Ntot), Ntot := NKj + NO2 + NO3]
 dt.n[, maand := month(mtp_datum)]
 dt.n[, jaar := year(mtp_datum)]
+View(dt.n)
+
+# Ntot median per month over all years
+dt.n.monthly <- dt.n[, .(Ntot.median = median(Ntot, na.rm = TRUE)), by = .(jaar, maand)]
+
+# Create a date column for plotting
+dt.n.monthly[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+
+require(ggplot2)
+
+# Plot the time series for monthly median Ntot
+ggplot(dt.n.monthly, aes(x = date, y = Ntot.median)) +
+  geom_line() + 
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  labs(title = "Monthly Median Total Nitrogen", x = "Date", y = "Median Ntot (mg/L)") + 
+  theme_minimal() + theme(text = element_text(size=20))
+
+
+# Ntot sd per month over all years
+dt.n.sd.monthly <- dt.n[, .(Ntot.sd = sd(Ntot, na.rm = TRUE)), by = .(jaar, maand)]
+
+# Create a date column for plotting
+dt.n.sd.monthly[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+
+# Plot the time series for montly sd Ntot
+ggplot(dt.n.sd.monthly, aes(x = date, y = Ntot.sd)) +
+  geom_line() + 
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  labs(title = "Monthly Sd Total Nitrogen", x = "Date", y = "Sd Ntot (mg/L)") + 
+  theme_minimal() + theme(text = element_text(size=20))
+
+
+
+
+
 # calculate median value per month per year
-dt.n <- dt.n[, .(Ntot = median(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand, jaar)]
+dt.n.m.y.median <- dt.n[, .(Ntot = median(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand, jaar)]
 # calculate monthly median
-dt.n <- dt.n[, .(Ntot = median(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand)]
+dt.n.m.median <- dt.n[, .(Ntot = median(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand)]
 # calculate summer median (march - september)
-dt.n.median <- dt.n[maand >= 3 & maand <= 9, .(Ntot.median = median(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
-dt.n.sd <- dt.n[maand >= 3 & maand <= 9, .(Ntot.sd = sd(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
-dt.n.n <- dt.n[!is.na(Ntot) & maand >= 3 & maand <= 9, .(Ntot.n = .N), by = list(mtp_id, mtp_x, mtp_y)]
-dt.n <- merge(dt.n.median, dt.n.sd, by = c("mtp_id", "mtp_x", "mtp_y"))
-dt.n <- merge(dt.n, dt.n.n, by = c("mtp_id", "mtp_x", "mtp_y"), all.x = T)
+dt.n.s.median <- dt.n[maand >= 3 & maand <= 9, .(Ntot.median = median(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
+dt.n.s.sd <- dt.n[maand >= 3 & maand <= 9, .(Ntot.sd = sd(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
+dt.n.s.n <- dt.n[!is.na(Ntot) & maand >= 3 & maand <= 9, .(Ntot.n = .N), by = list(mtp_id, mtp_x, mtp_y)]
+
+dt.n <- merge(dt.n.s.median, dt.n.s.sd, by = c("mtp_id", "mtp_x", "mtp_y"))
+dt.n <- merge(dt.n, dt.n.s.n, by = c("mtp_id", "mtp_x", "mtp_y"), all.x = T)
 dt.n[is.na(Ntot.n), Ntot.n := 0]
 dt.n <- dt.n[!is.na(Ntot.median),]
 
@@ -241,7 +377,77 @@ dt.p <- dcast(dt.p, mtp_id + mtp_x + mtp_y + mtp_datum ~ mtp_parameter, value.va
 dt.p <- dt.p[mtp_x != "" & mtp_x != 0]
 dt.p[, maand := month(mtp_datum)]
 dt.p[, jaar := year(mtp_datum)]
-dt.p2 <- copy(dt.p)
+View(dt.p)
+
+# Ptot median per month over all years
+dt.p.monthly <- dt.p[, .(Ptotmedian = median(Ptot, na.rm = TRUE)), by = .(jaar, maand)]
+
+# Create a date column for plotting
+dt.p.monthly[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+
+
+# Plot the time series for monthly median Ptot
+ggplot(dt.p.monthly, aes(x = date, y = Ptotmedian)) +
+  geom_line() + 
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  labs(title = "Monthly Median Total Phosphorous", x = "Date", y = "Median Ptot (mg/L)") + 
+  theme_minimal() + theme(text = element_text(size=20))
+
+# Plot the time series for monthly median PO4
+dt.PO4 <- dt.p[, .(PO4median =  median(PO4, na.rm = TRUE)), by = .(jaar, maand)]
+dt.PO4[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+ggplot(dt.PO4, aes(x = date, y = PO4median)) +
+  geom_line() + 
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  labs(title = "Monthly Median Phosphate", x = "Date", y = "Median PO4 (mg/L)") + 
+  theme_minimal() + theme(text = element_text(size=20))
+
+# Plot the time series for sd median PO4
+dt.PO4.sd <- dt.p[, .(PO4sd =  sd(PO4, na.rm = TRUE)), by = .(jaar, maand)]
+
+
+dt.PO4.sd[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+ggplot(dt.PO4.sd, aes(x = date, y = PO4sd)) +
+  geom_line() + 
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  labs(title = "Monthly Sd Phosphate", x = "Date", y = "Sd PO4 (mg/L)") + 
+  theme_minimal() + theme(text = element_text(size=20))
+
+# Ntot sd per month over all years
+dt.p.sd.monthly <- dt.p[, .(Ptot.sd = sd(Ptot, na.rm = TRUE)), by = .(jaar, maand)]
+
+# Create a date column for plotting
+dt.p.sd.monthly[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+
+# Plot the time series for montly sd Ntot
+ggplot(dt.p.sd.monthly, aes(x = date, y = Ptot.sd)) +
+  geom_line() + 
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  labs(title = "Monthly Sd Total Phosphorous", x = "Date", y = "Sd Ptot (mg/L)") + 
+  theme_minimal() + theme(text = element_text(size=20))
+
+
+
+#Groundwater timeseries
+
+
+nitrogen_ts_gw <- ts(dt.n.monthly$Ntot.median, start = c(2010, 1), frequency = 12)
+
+nitrogen_diff <- diff(nitrogen_ts, lag = 12)
+
+# Plot the differenced data
+plot(nitrogen_diff, main = "Differenced Monthly Nitrogen Levels",
+     xlab = "Year", ylab = "Differenced Nitrogen (mg/L)")
+
+
+# Plot the time series for montly Ntot
+nitrogen_ts <- ts(dt.n.monthly$Ntot.median, start = c(2010, 1), frequency = 12)
+
+nitrogen_diff <- diff(nitrogen_ts, lag = 12)
+
+# Plot the differenced data
+plot(nitrogen_diff, main = "Differenced Monthly Nitrogen Levels",
+     xlab = "Year", ylab = "Differenced Nitrogen (mg/L)")
 
 # calculate average PO4 value per month per year
 dt.p <- dt.p[, .(PO4 = mean(PO4, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand, jaar)]
@@ -276,17 +482,32 @@ dt.p <- dt.p[!is.na(PO4.median) | !is.na(Ptot.median),]
 
 ### nitrogen ----------------------
 
-# # calculate winter median (December - February)
-# dt.n.median <- dt.n[maand >= 12 & maand <= 2, .(Ntot.median = median(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
-# dt.n.sd <- dt.n[maand >= 12 & maand <= 2, .(Ntot.sd = sd(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
-# dt.n.n <- dt.n[!is.na(Ntot) & maand >= 12 & maand <= 2, .(Ntot.n = .N), by = list(mtp_id, mtp_x, mtp_y)]
-# dt.n <- merge(dt.n.median, dt.n.sd, by = c("mtp_id", "mtp_x", "mtp_y"))
-# dt.n <- merge(dt.n, dt.n.n, by = c("mtp_id", "mtp_x", "mtp_y"), all.x = T)
-# dt.n[is.na(Ntot.n), Ntot.n := 0]
-# dt.n <- dt.n[!is.na(Ntot.median),]
+# calculate winter median (October - February)
+dt.n.wintermedian <- dt.n[maand >= 10 & maand <= 2, .(Ntot.median = median(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
+dt.n.wintersd <- dt.n[maand >= 10 & maand <= 2, .(Ntot.sd = sd(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
+dt.n.wintern <- dt.n[!is.na(Ntot) & maand >= 10 & maand <= 2, .(Ntot.n = .N), by = list(mtp_id, mtp_x, mtp_y)]
+dt.n <- merge(dt.n.median, dt.n.sd, by = c("mtp_id", "mtp_x", "mtp_y"))
+dt.n <- merge(dt.n, dt.n.n, by = c("mtp_id", "mtp_x", "mtp_y"), all.x = T)
+dt.n[is.na(Ntot.n), Ntot.n := 0]
+dt.n <- dt.n[!is.na(Ntot.median),]
+dt.n.year <- dt.n[year(mtp_datum)]
+dt.n.month <- dt.n[month(mtp_datum)]
+
+
+dt.n.wintermedian <- dt.n[maand >= 10 & maand <= 2, .(Ntot.median = median(Ntot, na.rm = TRUE)), by = .(jaar, maand)]
+
+# Create a date column for plotting
+dt.n.wintermedian[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+
+# Plot the time series for montly sd Ntot
+ggplot(dt.n.wintermedian, aes(x = date, y = dt.n.wintermedian)) +
+  geom_line() + 
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  labs(title = "Monthly Sd Total Phosphorous", x = "Date", y = "Sd Ptot (mg/L)") + 
+  theme_minimal() + theme(text = element_text(size=20))
 
 # Calculate winter sd 
-dt.n.sd <- dt.n[maand >= 12 & maand <= 2, .(Ntot.sd = sd(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
+# dt.n.sd <- dt.n[maand >= 12 & maand <= 2, .(Ntot.sd = sd(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
 
 # Calculate winter n event > Q3
 
@@ -316,74 +537,102 @@ dt.n.sd <- dt.n[maand >= 12 & maand <= 2, .(Ntot.sd = sd(Ntot, na.rm = TRUE)), b
 
 
 
+# ## Map water quality measurements
+# library(sf)
+# library(tmap)
+# 
+# ## SF
+# pointSF <- sf:: st_as_sf(dt, coords = c("mtp_x", "mtp_y"), crs = 4326)
+# class(pointSF)
+# tmap::qtm(pointSF)
+# View(pointSF)
+# 
+# #write out the file
+# sf::st_write(pointSF, paste0(baseDir, "/outputs/Surfacewatercoords.shp"))
+# head(dt)
 
 
+require(sf)
+require(dplyr)
 
-# Convert to SF object -------------------
-sf.n <- st_as_sf(dt.n, coords = c("mtp_x", "mtp_y"), crs = 28992)
-sf.p <- st_as_sf(dt.p, coords = c("mtp_x", "mtp_y"), crs = 28992)
-st_write(sf.n, "C:/Users/Tldek/Documents/MES/MSc Thesis/Outputs/Interpolation/Nitrogen_winter.gpkg")
-st_write(sf.p, "C:/Users/Tldek/Documents/MES/MSc Thesis/Outputs/Phosphorous_winter.gpkg")
+# Convert data to sf object (assuming coordinates are in columns "mtp_x.index" and "mtp_y.index")
+loc.gw_clean <- loc.gw[!is.na(mtp_x) & !is.na(mtp_y)]
 
-# Create rasters for interesting values -----------------------------------
-st.mask <- st_as_stars(mask)
-st.mask <- st_warp(st.mask, cellsize = 250, crs = 28992)
+subset_loc.gw <- loc.gw_clean
+subset_loc.gw <- subset_loc.gw[,.(mtp_x,mtp_y,mtp_naam)]
+subset_loc.gw <- subset_loc.gw[!duplicated(mtp_x)]
+subset_loc.gw[,value := rnorm(.N,mean=10,sd=2.5)]
 
-idw.n.median <- gstat::idw(Ntot.median ~ 1, sf.n, newdata = st.mask, idp = 2.0, nmax = 10, debug.level = -1)
-write_stars(idw.n.median, paste0(onedrive, "project/NMI_bodemschat/products/wk_interpolation/wk_ntot_median.tif"))
+# Convert to sf object
+points_sf <- st_as_sf(subset_loc.gw, coords = c("mtp_x", "mtp_y"), crs = 28992)
 
-idw.n.sd <- gstat::idw(Ntot.sd ~ 1, sf.n, newdata = st.mask, idp = 2.0, nmax = 10, debug.level = -1)
-write_stars(idw.n.sd, paste0(onedrive, "project/NMI_bodemschat/products/wk_interpolation/wk_ntot_sd.tif"))
 
-idw.p.median <- gstat::idw(PO4.median ~ 1, sf.p, newdata = st.mask, idp = 2.0, nmax = 10, debug.level = -1)
-write_stars(idw.p.median, paste0(onedrive, "project/NMI_bodemschat/products/wk_interpolation/wk_po4_median.tif"))
-
-idw.p.sd <- gstat::idw(PO4.sd ~ 1, sf.p, newdata = st.mask, idp = 2.0, nmax = 10, debug.level = -1)
-write_stars(idw.p.sd, paste0(onedrive, "project/NMI_bodemschat/products/wk_interpolation/wk_po4_sd.tif"))
-
-#}
-
-addWaterKwaliteit <- function (fields, onedrive) {
-  
-  # Drop irrelevant columns for this function
-  fields <- fields[, "id"]
-  
-  # Create centroids of fields
-  points <- st_centroid(fields, of_largest_polygon = TRUE)
-  
-  # Setup table to list results
-  dt.wk <- data.table(id = fields$id)
-  
-  # Extract Ntot.median and insert into table
-  r.wk.ntot.median <- raster(paste0(onedrive, "project/NMI_Bodemschat/products/wk_interpolation/wk_ntot_median.tif"))
-  this.wk.ntot.median <- extract(r.wk.ntot.median , points, df = TRUE)
-  setnames(this.wk.ntot.median , c("ID", "wk_ntot_median"), c("id", "wk.ntot.median"))
-  dt.wk <- merge(dt.wk, this.wk.ntot.median, by = "id", all.x = TRUE)
-  
-  # Extract Ntot.sd and insert into table
-  r.wk.ntot.sd <- raster(paste0(onedrive, "project/NMI_Bodemschat/products/wk_interpolation/wk_ntot_sd.tif"))
-  this.wk.ntot.sd <- extract(r.wk.ntot.sd , points, df = TRUE)
-  setnames(this.wk.ntot.sd , c("ID", "wk_ntot_sd"), c("id", "wk.ntot.sd"))
-  dt.wk <- merge(dt.wk, this.wk.ntot.sd, by = "id", all.x = TRUE)
-  
-  # Extract po4.median and insert into table
-  r.wk.po4.median <- raster(paste0(onedrive, "project/NMI_Bodemschat/products/wk_interpolation/wk_po4_median.tif"))
-  this.wk.po4.median <- extract(r.wk.po4.median , points, df = TRUE)
-  setnames(this.wk.po4.median , c("ID", "wk_po4_median"), c("id", "wk.po4.median"))
-  dt.wk <- merge(dt.wk, this.wk.po4.median, by = "id", all.x = TRUE)
-  
-  # Extract po4.sd and insert into table
-  r.wk.po4.sd <- raster(paste0(onedrive, "project/NMI_Bodemschat/products/wk_interpolation/wk_po4_sd.tif"))
-  this.wk.po4.sd <- extract(r.wk.po4.sd , points, df = TRUE)
-  setnames(this.wk.po4.sd , c("ID", "wk_po4_sd"), c("id", "wk.po4.sd"))
-  dt.wk <- merge(dt.wk, this.wk.po4.sd, by = "id", all.x = TRUE)
-  
-  # Replace outliers
-  dt.wk[wk.ntot.sd > 15, wk.ntot.sd := 15]
-  dt.wk[wk.po4.sd > 4, wk.po4.sd := 4]
-  
-  # Merge waterkwaliteit data to the fields
-  fields <- merge(fields, dt.wk, by = "id", all.x = TRUE)
-  
-  return(fields)
-}
+View(subset_loc.gw)
+# # Convert to SF object -------------------
+# sf.n <- st_as_sf(dt.n, coords = c("mtp_x", "mtp_y"), crs = 28992)
+# sf.p <- st_as_sf(dt.p, coords = c("mtp_x", "mtp_y"), crs = 28992)
+# st_write(sf.n, "C:/Users/Tldek/Documents/MES/MSc Thesis/Outputs/Interpolation/Nitrogen_winter.gpkg")
+# st_write(sf.p, "C:/Users/Tldek/Documents/MES/MSc Thesis/Outputs/Phosphorous_winter.gpkg")
+# 
+# # Create rasters for interesting values -----------------------------------
+# st.mask <- st_as_stars(mask)
+# st.mask <- st_warp(st.mask, cellsize = 250, crs = 28992)
+# 
+# idw.n.median <- gstat::idw(Ntot.median ~ 1, sf.n, newdata = st.mask, idp = 2.0, nmax = 10, debug.level = -1)
+# write_stars(idw.n.median, paste0(onedrive, "project/NMI_bodemschat/products/wk_interpolation/wk_ntot_median.tif"))
+# 
+# idw.n.sd <- gstat::idw(Ntot.sd ~ 1, sf.n, newdata = st.mask, idp = 2.0, nmax = 10, debug.level = -1)
+# write_stars(idw.n.sd, paste0(onedrive, "project/NMI_bodemschat/products/wk_interpolation/wk_ntot_sd.tif"))
+# 
+# idw.p.median <- gstat::idw(PO4.median ~ 1, sf.p, newdata = st.mask, idp = 2.0, nmax = 10, debug.level = -1)
+# write_stars(idw.p.median, paste0(onedrive, "project/NMI_bodemschat/products/wk_interpolation/wk_po4_median.tif"))
+# 
+# idw.p.sd <- gstat::idw(PO4.sd ~ 1, sf.p, newdata = st.mask, idp = 2.0, nmax = 10, debug.level = -1)
+# write_stars(idw.p.sd, paste0(onedrive, "project/NMI_bodemschat/products/wk_interpolation/wk_po4_sd.tif"))
+# 
+# #}
+# 
+# addWaterKwaliteit <- function (fields, onedrive) {
+#   
+#   # Drop irrelevant columns for this function
+#   fields <- fields[, "id"]
+#   
+#   # Create centroids of fields
+#   points <- st_centroid(fields, of_largest_polygon = TRUE)
+#   
+#   # Setup table to list results
+#   dt.wk <- data.table(id = fields$id)
+#   
+#   # Extract Ntot.median and insert into table
+#   r.wk.ntot.median <- raster(paste0(onedrive, "project/NMI_Bodemschat/products/wk_interpolation/wk_ntot_median.tif"))
+#   this.wk.ntot.median <- extract(r.wk.ntot.median , points, df = TRUE)
+#   setnames(this.wk.ntot.median , c("ID", "wk_ntot_median"), c("id", "wk.ntot.median"))
+#   dt.wk <- merge(dt.wk, this.wk.ntot.median, by = "id", all.x = TRUE)
+#   
+#   # Extract Ntot.sd and insert into table
+#   r.wk.ntot.sd <- raster(paste0(onedrive, "project/NMI_Bodemschat/products/wk_interpolation/wk_ntot_sd.tif"))
+#   this.wk.ntot.sd <- extract(r.wk.ntot.sd , points, df = TRUE)
+#   setnames(this.wk.ntot.sd , c("ID", "wk_ntot_sd"), c("id", "wk.ntot.sd"))
+#   dt.wk <- merge(dt.wk, this.wk.ntot.sd, by = "id", all.x = TRUE)
+#   
+#   # Extract po4.median and insert into table
+#   r.wk.po4.median <- raster(paste0(onedrive, "project/NMI_Bodemschat/products/wk_interpolation/wk_po4_median.tif"))
+#   this.wk.po4.median <- extract(r.wk.po4.median , points, df = TRUE)
+#   setnames(this.wk.po4.median , c("ID", "wk_po4_median"), c("id", "wk.po4.median"))
+#   dt.wk <- merge(dt.wk, this.wk.po4.median, by = "id", all.x = TRUE)
+#   
+#   # Extract po4.sd and insert into table
+#   r.wk.po4.sd <- raster(paste0(onedrive, "project/NMI_Bodemschat/products/wk_interpolation/wk_po4_sd.tif"))
+#   this.wk.po4.sd <- extract(r.wk.po4.sd , points, df = TRUE)
+#   setnames(this.wk.po4.sd , c("ID", "wk_po4_sd"), c("id", "wk.po4.sd"))
+#   dt.wk <- merge(dt.wk, this.wk.po4.sd, by = "id", all.x = TRUE)
+#   
+#   # Replace outliers
+#   dt.wk[wk.ntot.sd > 15, wk.ntot.sd := 15]
+#   dt.wk[wk.po4.sd > 4, wk.po4.sd := 4]
+#   
+#   # Merge waterkwaliteit data to the fields
+#   fields <- merge(fields, dt.wk, by = "id", all.x = TRUE)
+#   
+#   return(fields)
+# }
