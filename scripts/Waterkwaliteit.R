@@ -630,3 +630,34 @@ final.chemie.sw <- readRDS("final_dt_sw.rds")
 #   labs(title = "Monthly Sd Total Phosphorous", x = "Date", y = "Sd Ptot (mg/L)") + 
 #   theme_minimal() + theme(text = element_text(size=20))
 
+# provincies NL
+prov <- st_read('provinciegrenzen/2018-Imergis_provinciegrenzen_kustlijn.shp')
+
+# location of the water regions selected by Tessa
+grouped_polygons <- st_read('grouped_polygons.gpkg')
+
+all.sw.points <- st_read("sw.coords.gpkg")
+all.gw.points <- st_read("gw.coords.gpkg")
+
+require(ggplot2)
+require(patchwork)
+
+p1 <- ggplot() + 
+  geom_sf(data = prov, color = 'black', fill = NA) +
+  #geom_sf(data = grouped_polygons, color = 'grey26', fill = 'grey') +
+  geom_sf(data = all.sw.points, color = 'red', fill = 'red', size = 1) + 
+  theme_bw() + ggtitle("All Surface Water Measurements") +
+  theme(text = element_text(size=20))
+
+p2 <- ggplot() + 
+  geom_sf(data = prov, color = 'black', fill = NA) +
+  #geom_sf(data = grouped_polygons, color = 'grey26', fill = 'grey') +
+  geom_sf(data = all.gw.points, color = 'red', fill = 'red', size = 1) + 
+  theme_bw() + ggtitle("All Groundwater Measurements") +
+  theme(text = element_text(size=20))
+
+p3 = p1+p2
+
+ggsave(plot = p3,filename = 'products/plot_all_measurements.png',width = 14,height = 8)
+
+
