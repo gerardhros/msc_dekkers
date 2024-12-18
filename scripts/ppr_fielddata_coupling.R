@@ -4,11 +4,12 @@ require(data.table)
 require(sf)
 
 # provincies NL
-#prov <- st_read(paste0(Sys.getenv('NMI_DATA'),'topo/provincies/2018-Imergis_provinciegrenzen_kustlijn.shp'))
-prov <- st_read('provinciegrenzen/2018-Imergis_provinciegrenzen_kustlijn.shp')
+prov <- st_read(paste0(Sys.getenv('NMI_DATA'),'topo/provincies/2018-Imergis_provinciegrenzen_kustlijn.shp'))
+#prov <- st_read('provinciegrenzen/2018-Imergis_provinciegrenzen_kustlijn.shp')
 
 # location of the water regions selected by Tessa
-s1 <- st_read('grouped_polygons.gpkg')
+#s1 <- st_read('grouped_polygons.gpkg')
+s1 <- st_read('../grouped_polygons.gpkg')
 
 # convert water regions from MULTYPOLOGYON TO POLYGON
 s1.impr <- st_cast(s1,'POLYGON')
@@ -20,16 +21,18 @@ s1.impr[,grouped_name := paste0(grouped_name,groep)]
 s1.impr <- st_as_sf(s1.impr)
 
 # spatial features object for agricultural fields
-s1.fields <- readRDS('Field data/brp_selected_sf.rds')
+#s1.fields <- readRDS('Field data/brp_selected_sf.rds')
+s1.fields <- readRDS('../brp_selected_sf.rds')
 
 # spatial features dataset
 s1.fields.data <- readRDS('Field data/brp_selected.rds')
+s1.fields.data <- readRDS('../brp_selected.rds')
 
 # for now i select only one year per field (later this will be the BBWP score or mean inputs)
 s1.fields.data <- s1.fields.data[,.SD[1],by='id']
 
 # water quality measurement points for nitrogen
-d1.wq.n <- readRDS('sw_nitrogen_mp.rds')
+d1.wq.n <- readRDS('../sw_nitrogen_mp.rds')
 
 
 # make water quality points spatial from the multi-annual averaged N concentration
@@ -49,7 +52,7 @@ s1.sw.n.win <- st_intersection(s1.sw.n.win,s1.impr)
 
 # inladen waterlichamen en select only those in water regions
 # s1.water <- st_read(paste0(Sys.getenv('NMI_DATA'),'topo/top10NL/TOP10NL_gpkg/top10nl_Waterdeel.gpkg'),layer = 'top10nl_waterdeel_lijn')
-s1.water <- st_read('top1nl_waterdeel_selectie.gpkg')
+s1.water <- st_read('../top1nl_waterdeel_selectie.gpkg')
 s1.water <- st_intersection(s1.water,s1.impr)
 # plot(st_geometry(s1.water))
 
@@ -95,10 +98,18 @@ regions <- unique(s1.impr$grouped_name)#[2]
     test[,fieldid := s3.fields.sw$id]
     test <- melt(test,id.vars='fieldid',variable.name = 'mtp_id',value.name = 'DTM')
     
+    # convert DTM to numeric
+    if('DTM' %in% colnames(test)){
+      test[, dtm := as.numeric(DTM)]
+    }
+    
+    # add region
+    test[,region := i]
+    
     # save output in a list
     out.list[[i]] <- copy(test)
     
-    saveRDS(out.list, "out_list_sw_winter.rds")
+    #saveRDS(out.list, "out_list_sw_winter.rds")
     
     # print i
     print(i)
@@ -172,9 +183,13 @@ all_regions_combined <- fread("all_regions_combined.csv")
 #   fwrite(merged_list[[region_name]], paste0(region_name, "_merged.csv"))
 # }
 # 
-# out <- merge(out,s1.fields.data,all.x=TRUE,by.x='fieldid',by.y='id')
-# out <- merge(out,d2.sw.n[,.(mtp_id,regio = grouped_name,Ntot)],all.x=TRUE,by = 'mtp_id')
-# out <- unique(out, by = "fieldid")
+out <- rbindlist(out.list,fill=TRUE)
+out <- unique(out)
+
+s1.sw.n.sum <- as.data.table(s1.sw.n.sum)
+ out <- merge(out,s1.fields.data,all.x=TRUE,by.x='fieldid',by.y='id')
+ out <- merge(out,s1.sw.n.sum[,.(mtp_id,regio = grouped_name,Ntot)],all.x=TRUE,by = 'mtp_id')
+ out <- unique(out, by = "fieldid")
 # Duingebied_Zuid <- merge(out, dt.p, by = "mtp_id")
 # 
 # for (i in out.list) {
