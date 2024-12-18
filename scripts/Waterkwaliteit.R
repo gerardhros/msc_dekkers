@@ -120,7 +120,7 @@ st_write(lsw, "sw.coords.gpkg")
 fwrite(dt.loc, file= "sw.coordinates.csv")
 fwrite(gw.loc, file = "gw.coordinates.csv")
 
-
+View(dt.loc)
 
 # Grondwater chemie. Every chemie file has another header, so make new dt with consistent headers
 
@@ -165,14 +165,14 @@ dt.chemie.gw$mtp_id <- gsub("\"", '', dt.chemie.gw$mtp_id)
 dt.chemie.gw$mtp_datum <- as.Date(dt.chemie.gw$mtp_datum)
 View(dt.chemie.gw)
 
-# # merge XY coordinate into chemistry data table
-# dt.gw <- merge(dt.chemie.gw, gw.loc, by = c("mtp_id"))
-# dt.gw$mtp_naam.y <- NULL
-# setnames(dt.gw, c("mtp_naam.x"), "mtp_naam")
-# View(dt.gw)
-# 
-# # temp # check number of unique ID (with valid xy coordinate) per year
-# dt.gw[, lapply(.SD, function(x) length(unique(x))), .SDcols = "mtp_id", by = year(mtp_datum)]
+# merge XY coordinate into chemistry data table
+dt.gw <- merge(dt.chemie.gw, gw.loc, by.x = "mtp_id", by.y = "mtp_naam")
+dt.gw$mtp_naam.y <- NULL
+setnames(dt.gw, c("mtp_naam.x"), "mtp_naam")
+View(dt.gw)
+
+# temp # check number of unique ID (with valid xy coordinate) per year
+dt.gw[, lapply(.SD, function(x) length(unique(x))), .SDcols = "mtp_id", by = year(mtp_datum)]
 
 
 
@@ -200,7 +200,7 @@ for (file in chemie.files) {
   mtp_waarde.index <- which(colnames(this.file) %in% c("mwa_mwawrden", "numeriekewaarde"))
   mtp_eenheid.index <- which(colnames(this.file) %in% c("mep_domgwcod", "eenheid.code"))
   mtp_datum.index <- which(colnames(this.file) %in% c("mwa_mwadtmb", "begindatum"))
-  mtp_tijd.index <- which(colnames(this.file) %in% c("mwa_mwadtijdb", "mwa_mwatijdb", "begintijd"))
+  #mtp_tijd.index <- which(colnames(this.file) %in% c("mwa_mwadtijdb", "mwa_mwatijdb", "begintijd"))
   
   new.file <- data.table(mtp_naam = this.file[, ..mtp_naam.index],
                          mtp_compartiment = this.file[, ..mtp_compartiment.index],
@@ -208,11 +208,11 @@ for (file in chemie.files) {
                          mtp_parameter = this.file[, ..mtp_parameter.index],
                          mtp_waarde = this.file[, ..mtp_waarde.index],
                          mtp_eenheid = this.file[, ..mtp_eenheid.index],
-                         mtp_datum = this.file[, ..mtp_datum.index],
-                         mtp_tijd = this.file[, ..mtp_tijd.index])
+                         mtp_datum = this.file[, ..mtp_datum.index])
+                         #mtp_tijd = this.file[, ..mtp_tijd.index])
   setnames(new.file,
            colnames(new.file),
-           c("mtp_naam", "mtp_compartiment", "mtp_id", "mtp_parameter", "mtp_waarde", "mtp_eenheid", "mtp_datum", "mtp_tijd"))
+           c("mtp_naam", "mtp_compartiment", "mtp_id", "mtp_parameter", "mtp_waarde", "mtp_eenheid", "mtp_datum"))
   
   chemie[[file]] <- new.file
   
@@ -288,60 +288,83 @@ dt.n_ori <- copy(dt.n)
 dt.n <- dcast(dt.n, mtp_id + mtp_x + mtp_y + mtp_datum ~ mtp_parameter, value.var = "mtp_waarde", fun.aggregate = median)
 dt.n <- dt.n[mtp_x != "" & mtp_x != 0]
 dt.n[is.na(Ntot), Ntot := NKj + NO2 + NO3]
+dt.n[, Ntot := NKj + NO2 + NO3]
 dt.n[, maand := month(mtp_datum)]
 dt.n[, jaar := year(mtp_datum)]
 View(dt.n)
 
-# Ntot median per month over all years
-dt.n.monthly <- dt.n[, .(Ntot.median = median(Ntot, na.rm = TRUE)), by = .(jaar, maand)]
 
-# Create a date column for plotting
-dt.n.monthly[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+dt.n <- dt.n[jaar >= 2000 & jaar <= 2019]
 
-require(ggplot2)
+unique(dt.p$jaar)
 
-# Plot the time series for monthly median Ntot
-ggplot(dt.n.monthly, aes(x = date, y = Ntot.median)) +
-  geom_line() + 
-  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
-  labs(title = "Monthly Median Total Nitrogen", x = "Date", y = "Median Ntot (mg/L)") + 
-  theme_minimal() + theme(text = element_text(size=20))
+# Calculate median, sd, n, and n >3Q for NH4, NKj, NO2, NO3, and Ntot per month per year (force all rows in merge with all.x = TRUE)
+dt.NH4.median <- dt.n[, .(NH4_median =  median(NH4, na.rm = TRUE)), by = .(jaar, maand)]
+dt.n <- merge(dt.n, dt.NH4.median, by = c("maand", "jaar"), all.x = TRUE)
+dt.NH4.sd <- dt.n[, .(NH4sd =  sd(NH4, na.rm = TRUE)), by = .(jaar, maand)]
+dt.n <- merge(dt.n, dt.NH4.sd, by = c("maand", "jaar"), all.x = TRUE)
+dt.NH4.n <- dt.n[!is.na(NH4), .(NH4.n = .N), by = .(jaar, maand)]
+dt.n <- merge(dt.n, dt.NH4.n, by = c("maand", "jaar"), all.x = TRUE)
 
+dt.NKj.median <- dt.n[, .(NKjmedian =  median(NKj, na.rm = TRUE)), by = .(jaar, maand)]
+dt.n <- merge(dt.n, dt.NKj.median, by = c("maand", "jaar"), all.x = TRUE)
+dt.NKj.sd <- dt.n[, .(NKjsd =  sd(NKj, na.rm = TRUE)), by = .(jaar, maand)]
+dt.n <- merge(dt.n, dt.NKj.sd, by = c("maand", "jaar"), all.x = TRUE)
+dt.NKj.n <- dt.n[!is.na(NKj), .(NKj.n = .N), by = .(jaar, maand)]
+dt.n <- merge(dt.n, dt.NKj.n, by = c("maand", "jaar"), all.x = TRUE)
 
-# Ntot sd per month over all years
-dt.n.sd.monthly <- dt.n[, .(Ntot.sd = sd(Ntot, na.rm = TRUE)), by = .(jaar, maand)]
+dt.NO2.median <- dt.n[, .(NO2median =  median(NO2, na.rm = TRUE)), by = .(jaar, maand)]
+dt.n <- merge(dt.n, dt.NO2.median, by = c("maand", "jaar"), all.x = TRUE)
+dt.NO2.sd <- dt.n[, .(NO2sd =  sd(NO2, na.rm = TRUE)), by = .(jaar, maand)]
+dt.n <- merge(dt.n, dt.NO2.sd, by = c("maand", "jaar"), all.x = TRUE)
+dt.NO2.n <- dt.n[!is.na(NO2), .(NO2.n = .N), by = .(jaar, maand)]
+dt.n <- merge(dt.n, dt.NO2.n, by = c("maand", "jaar"), all.x = TRUE)
 
-# Create a date column for plotting
-dt.n.sd.monthly[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+dt.NO3.median <- dt.n[, .(NO3median =  median(NO3, na.rm = TRUE)), by = .(jaar, maand)]
+dt.n <- merge(dt.n, dt.NO3.median, by = c("maand", "jaar"), all.x = TRUE)
+dt.NO3.sd <- dt.n[, .(NO3sd =  sd(NO3, na.rm = TRUE)), by = .(jaar, maand)]
+dt.n <- merge(dt.n, dt.NO3.sd, by = c("maand", "jaar"), all.x = TRUE)
+dt.NO3.n <- dt.n[!is.na(NO3), .(NO3.n = .N), by = .(jaar, maand)]
+dt.n <- merge(dt.n, dt.NO3.n, by = c("maand", "jaar"), all.x = TRUE)
 
-# Plot the time series for montly sd Ntot
-ggplot(dt.n.sd.monthly, aes(x = date, y = Ntot.sd)) +
-  geom_line() + 
-  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
-  labs(title = "Monthly Sd Total Nitrogen", x = "Date", y = "Sd Ntot (mg/L)") + 
-  theme_minimal() + theme(text = element_text(size=20))
+dt.Ntot.median <- dt.n[, .(Ntotmedian = median(Ntot, na.rm = TRUE)), by = .(jaar, maand)]
+dt.n <- merge(dt.n, dt.Ntot.median, by = c("maand", "jaar"), all.x = TRUE)
+dt.Ntot.sd <- dt.n[, .(Ntot.sd = sd(Ntot, na.rm = TRUE)), by = .(jaar, maand)]
+dt.n <- merge(dt.n, dt.Ntot.sd, by = c("maand", "jaar"), all.x = TRUE)
+dt.Ntot.n <- dt.n[!is.na(Ntot), .(Ntot.n = .N), by = .(jaar, maand)]
+dt.n <- merge(dt.n, dt.Ntot.n, by = c("maand", "jaar"), all.x = TRUE)
 
+unique(dt.n$jaar)
 
+# Calculate the 3rd quantile for PO4 and Ptot per month and year, and add count columns
+dt.n[, `:=`(
+  NH4_3rd_quantile = quantile(NH4, 0.75, na.rm = TRUE),
+  NKj_3rd_quantile = quantile(NKj, 0.75, na.rm = TRUE),
+  NO2_3rd_quantile = quantile(NO2, 0.75, na.rm = TRUE),
+  NO3_3rd_quantile = quantile(NO3, 0.75, na.rm = TRUE),
+  Ntot_3rd_quantile = quantile(Ntot, 0.75, na.rm = TRUE)
+), by = .(jaar, maand)]
 
+dt.n[, `:=`(
+  NH4_exceeds = sum(NH4 > NH4_3rd_quantile, na.rm = TRUE),
+  NKj_exceeds = sum(NKj > NKj_3rd_quantile, na.rm = TRUE),
+  NO2_exceeds = sum(NO2 > NO2_3rd_quantile, na.rm = TRUE),
+  NO3_exceeds = sum(NO3 > NO3_3rd_quantile, na.rm = TRUE),
+  Ntot_exceeds = sum(Ntot > Ntot_3rd_quantile, na.rm = TRUE)
+), by = .(jaar, maand)]
 
+unique(dt.p$jaar)
 
-# calculate median value per month per year
-dt.n.m.y.median <- dt.n[, .(Ntot = median(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand, jaar)]
-# calculate monthly median
-dt.n.m.median <- dt.n[, .(Ntot = median(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand)]
-# calculate summer median (march - september)
-dt.n.s.median <- dt.n[maand >= 3 & maand <= 9, .(Ntot.median = median(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
-dt.n.s.sd <- dt.n[maand >= 3 & maand <= 9, .(Ntot.sd = sd(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
-dt.n.s.n <- dt.n[!is.na(Ntot) & maand >= 3 & maand <= 9, .(Ntot.n = .N), by = list(mtp_id, mtp_x, mtp_y)]
-
-dt.n <- merge(dt.n.s.median, dt.n.s.sd, by = c("mtp_id", "mtp_x", "mtp_y"))
-dt.n <- merge(dt.n, dt.n.s.n, by = c("mtp_id", "mtp_x", "mtp_y"), all.x = T)
-dt.n[is.na(Ntot.n), Ntot.n := 0]
-dt.n <- dt.n[!is.na(Ntot.median),]
+dt.n[, NH4_3rd_quantile := NULL]
+dt.n[, NKj_3rd_quantile := NULL]
+dt.n[, NO2_3rd_quantile := NULL]
+dt.n[, NO3_3rd_quantile := NULL]
+dt.n[, Ntot_3rd_quantile := NULL]
 
 
 # Pre-processing data table for P -------------------
 poi.p <- c("orthofosfaat", "totaal fosfaat", "fosfaat", "fosfor totaal", "Ptot", "PO4")
+
 dt.p <- dt[mtp_parameter %in% poi.p & mtp_eenheid %in% c("mg/l", "ug/l")]
 dt.p[, mtp_waarde := as.numeric(mtp_waarde)]
 dt.p[mtp_eenheid == "ug/l", mtp_waarde := mtp_waarde / 1000]
@@ -371,268 +394,270 @@ dt.p <- dt.p[!(mtp_parameter == "PO4" & mtp_waarde > 1000000), ]
 
 # temp 
 dt.p_ori <- copy(dt.p)
+gw.p <- copy(dt.p_ori)
+ 
+dt.p <- gw.p
 
-
-dt.p <- dcast(dt.p, mtp_id + mtp_x + mtp_y + mtp_datum ~ mtp_parameter, value.var = "mtp_waarde", fun.aggregate = median)
+dt.p <- dcast(gw.p, mtp_id + mtp_x + mtp_y + mtp_datum ~ mtp_parameter, value.var = "mtp_waarde", fun.aggregate = median)
 dt.p <- dt.p[mtp_x != "" & mtp_x != 0]
 dt.p[, maand := month(mtp_datum)]
 dt.p[, jaar := year(mtp_datum)]
 View(dt.p)
 
-# Ptot median per month over all years
-dt.p.monthly <- dt.p[, .(Ptotmedian = median(Ptot, na.rm = TRUE)), by = .(jaar, maand)]
+dt.p <- dt.p[jaar >= 2000 & jaar <= 2019]
 
-# Create a date column for plotting
-dt.p.monthly[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+unique(dt.p$jaar)
+
+# Ptot & PO4 median per month per year, merge by month and year
+dt.Ptot.median <- dt.p[, .(Ptotmedian = median(Ptot, na.rm = TRUE)), by = .(jaar, maand)]
+dt.p <- merge(dt.p, dt.Ptot.median, by = c("maand", "jaar"), all.x = TRUE)
+dt.Ptot.sd <- dt.p[, .(Ptot.sd = sd(Ptot, na.rm = TRUE)), by = .(jaar, maand)]
+dt.p <- merge(dt.p, dt.Ptot.sd, by = c("maand", "jaar"), all.x = TRUE)
+dt.Ptot.n <- dt.p[!is.na(Ptot), .(Ptot.n = .N), by = .(jaar, maand)]
+dt.p <- merge(dt.p, dt.Ptot.n, by = c("maand", "jaar"), all.x = TRUE)
+dt.PO4.median <- dt.p[, .(PO4median =  median(PO4, na.rm = TRUE)), by = .(jaar, maand)]
+dt.p <- merge(dt.p, dt.PO4.median, by = c("maand", "jaar"), all.x = TRUE)
+dt.PO4.sd <- dt.p[, .(PO4sd =  sd(PO4, na.rm = TRUE)), by = .(jaar, maand)]
+dt.p <- merge(dt.p, dt.PO4.sd, by = c("maand", "jaar"), all.x = TRUE)
+dt.PO4.n <- dt.p[!is.na(PO4), .(PO4.n = .N), by = .(jaar, maand)]
+dt.p <- merge(dt.p, dt.PO4.n, by = c("maand", "jaar"), all.x = TRUE)
+unique(dt.p$jaar)
+View(dt.Ptot.median)
+
+# Calculate the 3rd quantile for PO4 and Ptot per month and year, and add count columns
+dt.p[, `:=`(
+  PO4_3rd_quantile = quantile(PO4, 0.75, na.rm = TRUE),
+  Ptot_3rd_quantile = quantile(Ptot, 0.75, na.rm = TRUE)
+), by = .(jaar, maand)]
+
+dt.p[, `:=`(
+  PO4_exceeds = sum(PO4 > PO4_3rd_quantile, na.rm = TRUE),
+  Ptot_exceeds = sum(Ptot > Ptot_3rd_quantile, na.rm = TRUE)
+), by = .(jaar, maand)]
+unique(dt.p$jaar)
+
+dt.p[, PO4_3rd_quantile := NULL]
+dt.p[, Ptot_3rd_quantile := NULL]
+
+# Merge dt.n and dt.p into final groundwater dataset
+final.dt.gw <- merge(dt.n, dt.p, by = c("mtp_id", "mtp_x", "mtp_y", "mtp_datum", "maand", "jaar"), all.x = TRUE)
+final.dt.sw <- merge(dt.n, dt.p, by = c("mtp_id", "mtp_x", "mtp_y", "mtp_datum", "maand", "jaar"), all.x = TRUE)
+
+#Identify the season
+final.dt.gw[, season := fifelse(maand %in% c(10, 11, 12, 1, 2), "winter", "summer")]
+View(final.dt.gw)
+final.dt.sw[, season := fifelse(maand %in% c(10, 11, 12, 1, 2), "winter", "summer")]
+View(final.dt.sw)
+
+# Save final datasets:
+saveRDS(final.dt.gw, "final_dt_gw.rds")
+final.chemie.gw <- readRDS("final_dt_gw.rds")
+
+saveRDS(final.dt.sw, "final_dt_sw.rds")
+final.chemie.sw <- readRDS("final_dt_sw.rds")
 
 
-# Plot the time series for monthly median Ptot
-ggplot(dt.p.monthly, aes(x = date, y = Ptotmedian)) +
-  geom_line() + 
-  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
-  labs(title = "Monthly Median Total Phosphorous", x = "Date", y = "Median Ptot (mg/L)") + 
-  theme_minimal() + theme(text = element_text(size=20))
+### Notes for calculations and plotting:
+#
+#
+# # Ntot median per month over all years
+# dt.n.monthly <- dt.n[, .(Ntot.median = median(Ntot, na.rm = TRUE)), by = .(jaar, maand)]
+# 
+# # Create a date column for plotting
+# dt.n.monthly[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+# 
+# require(ggplot2)
+# 
+# # Plot the time series for monthly median Ntot
+# ggplot(dt.n.monthly, aes(x = date, y = Ntot.median)) +
+#   geom_line() + 
+#   scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+#   labs(title = "Monthly Median Total Nitrogen", x = "Date", y = "Median Ntot (mg/L)") + 
+#   theme_minimal() + theme(text = element_text(size=20))
+# 
+# 
+# # Ntot sd per month over all years
+# dt.n.sd.monthly <- dt.n[, .(Ntot.sd = sd(Ntot, na.rm = TRUE)), by = .(jaar, maand)]
+# 
+# # Create a date column for plotting
+# dt.n.sd.monthly[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+# 
+# # Plot the time series for montly sd Ntot
+# ggplot(dt.n.sd.monthly, aes(x = date, y = Ntot.sd)) +
+#   geom_line() + 
+#   scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+#   labs(title = "Monthly Sd Total Nitrogen", x = "Date", y = "Sd Ntot (mg/L)") + 
+#   theme_minimal() + theme(text = element_text(size=20))
+# 
+# # calculate median value per month per year
+# dt.n.m.y.median <- dt.n[, .(Ntot = median(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand, jaar)]
+# # calculate monthly median
+# dt.n.m.median <- dt.n[, .(Ntot = median(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand)]
+# # calculate summer median (march - september)
+# dt.n.s.median <- dt.n[maand >= 3 & maand <= 9, .(Ntot.median = median(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
+# dt.n.s.sd <- dt.n[maand >= 3 & maand <= 9, .(Ntot.sd = sd(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
+# dt.n.s.n <- dt.n[!is.na(Ntot) & maand >= 3 & maand <= 9, .(Ntot.n = .N), by = list(mtp_id, mtp_x, mtp_y)]
+# 
+# dt.new <- merge(dt.n.s.median, dt.n.s.sd, by = c("mtp_id", "mtp_x", "mtp_y"))
+# dt.new <- merge(dt.new, dt.n.s.n, by = c("mtp_id", "mtp_x", "mtp_y"), all.x = T)
+# dt.new[is.na(Ntot.n), Ntot.n := 0]
+# dt.new <- dt.new[!is.na(Ntot.median),]
+
+# # Create a date column for plotting
+# dt.p.monthly[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+# 
+# 
+# # Plot the time series for monthly median Ptot
+# ggplot(dt.p.monthly, aes(x = date, y = Ptotmedian)) +
+#   geom_line() + 
+#   scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+#   labs(title = "Monthly Median Total Phosphorous", x = "Date", y = "Median Ptot (mg/L)") + 
+#   theme_minimal() + theme(text = element_text(size=20))
 
 # Plot the time series for monthly median PO4
-dt.PO4 <- dt.p[, .(PO4median =  median(PO4, na.rm = TRUE)), by = .(jaar, maand)]
-dt.PO4[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
-ggplot(dt.PO4, aes(x = date, y = PO4median)) +
-  geom_line() + 
-  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
-  labs(title = "Monthly Median Phosphate", x = "Date", y = "Median PO4 (mg/L)") + 
-  theme_minimal() + theme(text = element_text(size=20))
+# dt.PO4 <- dt.p[, .(PO4median =  median(PO4, na.rm = TRUE)), by = .(jaar, maand)]
+# dt.PO4[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+# ggplot(dt.PO4, aes(x = date, y = PO4median)) +
+#   geom_line() + 
+#   scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+#   labs(title = "Monthly Median Phosphate", x = "Date", y = "Median PO4 (mg/L)") + 
+#   theme_minimal() + theme(text = element_text(size=20))
 
 # Plot the time series for sd median PO4
-dt.PO4.sd <- dt.p[, .(PO4sd =  sd(PO4, na.rm = TRUE)), by = .(jaar, maand)]
-
-
-dt.PO4.sd[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
-ggplot(dt.PO4.sd, aes(x = date, y = PO4sd)) +
-  geom_line() + 
-  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
-  labs(title = "Monthly Sd Phosphate", x = "Date", y = "Sd PO4 (mg/L)") + 
-  theme_minimal() + theme(text = element_text(size=20))
+# dt.PO4.sd <- dt.p[, .(PO4sd =  sd(PO4, na.rm = TRUE)), by = .(jaar, maand)]
+# 
+# 
+# dt.PO4.sd[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+# ggplot(dt.PO4.sd, aes(x = date, y = PO4sd)) +
+#   geom_line() + 
+#   scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+#   labs(title = "Monthly Sd Phosphate", x = "Date", y = "Sd PO4 (mg/L)") + 
+#   theme_minimal() + theme(text = element_text(size=20))
 
 # Ntot sd per month over all years
-dt.p.sd.monthly <- dt.p[, .(Ptot.sd = sd(Ptot, na.rm = TRUE)), by = .(jaar, maand)]
-
-# Create a date column for plotting
-dt.p.sd.monthly[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
-
-# Plot the time series for montly sd Ntot
-ggplot(dt.p.sd.monthly, aes(x = date, y = Ptot.sd)) +
-  geom_line() + 
-  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
-  labs(title = "Monthly Sd Total Phosphorous", x = "Date", y = "Sd Ptot (mg/L)") + 
-  theme_minimal() + theme(text = element_text(size=20))
-
-
+# dt.p.sd.monthly <- dt.p[, .(Ptot.sd = sd(Ptot, na.rm = TRUE)), by = .(jaar, maand)]
+# 
+# # Create a date column for plotting
+# dt.p.sd.monthly[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+# 
+# # Plot the time series for montly sd Ntot
+# ggplot(dt.p.sd.monthly, aes(x = date, y = Ptot.sd)) +
+#   geom_line() + 
+#   scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+#   labs(title = "Monthly Sd Total Phosphorous", x = "Date", y = "Sd Ptot (mg/L)") + 
+#   theme_minimal() + theme(text = element_text(size=20))
 
 #Groundwater timeseries
 
-
-nitrogen_ts_gw <- ts(dt.n.monthly$Ntot.median, start = c(2010, 1), frequency = 12)
-
-nitrogen_diff <- diff(nitrogen_ts, lag = 12)
-
-# Plot the differenced data
-plot(nitrogen_diff, main = "Differenced Monthly Nitrogen Levels",
-     xlab = "Year", ylab = "Differenced Nitrogen (mg/L)")
-
-
-# Plot the time series for montly Ntot
-nitrogen_ts <- ts(dt.n.monthly$Ntot.median, start = c(2010, 1), frequency = 12)
-
-nitrogen_diff <- diff(nitrogen_ts, lag = 12)
-
-# Plot the differenced data
-plot(nitrogen_diff, main = "Differenced Monthly Nitrogen Levels",
-     xlab = "Year", ylab = "Differenced Nitrogen (mg/L)")
+# 
+# nitrogen_ts_gw <- ts(dt.n.monthly$Ntot.median, start = c(2010, 1), frequency = 12)
+# 
+# nitrogen_diff <- diff(nitrogen_ts, lag = 12)
+# 
+# # Plot the differenced data
+# plot(nitrogen_diff, main = "Differenced Monthly Nitrogen Levels",
+#      xlab = "Year", ylab = "Differenced Nitrogen (mg/L)")
+# 
+# 
+# # Plot the time series for montly Ntot
+# nitrogen_ts <- ts(dt.n.monthly$Ntot.median, start = c(2010, 1), frequency = 12)
+# 
+# nitrogen_diff <- diff(nitrogen_ts, lag = 12)
+# 
+# # Plot the differenced data
+# plot(nitrogen_diff, main = "Differenced Monthly Nitrogen Levels",
+#      xlab = "Year", ylab = "Differenced Nitrogen (mg/L)")
 
 # calculate average PO4 value per month per year
-dt.p <- dt.p[, .(PO4 = mean(PO4, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand, jaar)]
-# calculate monthly average PO4
-dt.p <- dt.p[, .(PO4 = mean(PO4, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand)]
+# dt.p <- dt.p[, .(PO4 = mean(PO4, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand, jaar)]
+# # calculate monthly average PO4
+# dt.p <- dt.p[, .(PO4 = mean(PO4, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand)]
 # calculate summer average PO4 (march - september)
-dt.p.median <- dt.p[maand >= 3 & maand <= 9, .(PO4.median = median(PO4, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
-dt.p.sd <- dt.p[maand >= 3 & maand <= 9, .(PO4.sd = sd(PO4, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
-dt.p.n <- dt.p[!is.na(PO4) & maand >= 3 & maand <= 9, .(PO4.n = .N), by = list(mtp_id, mtp_x, mtp_y)]
-dt.p <- merge(dt.p.median, dt.p.sd, by = c("mtp_id", "mtp_x", "mtp_y"))
-dt.p <- merge(dt.p, dt.p.n, by = c("mtp_id", "mtp_x", "mtp_y"), all.x = T)
-dt.p[is.na(PO4.n), PO4.n := 0]
+# dt.p.median <- dt.p[maand >= 3 & maand <= 9, .(PO4.median = median(PO4, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
+# dt.p.sd <- dt.p[maand >= 3 & maand <= 9, .(PO4.sd = sd(PO4, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
+# dt.p.n <- dt.p[!is.na(PO4) & maand >= 3 & maand <= 9, .(PO4.n = .N), by = list(mtp_id, mtp_x, mtp_y)]
+# dt.p.values<- merge(dt.p.median, dt.p.sd, by = c("mtp_id", "mtp_x", "mtp_y"))
+# dt.pp <- merge(dt.p, dt.p.values, by = c("mtp_id", "mtp_x", "mtp_y"))
+# dt.p <- merge(dt.pp, dt.p.n, by = c("mtp_id", "mtp_x", "mtp_y"), all.x = T)
+# dt.p[is.na(PO4.n), PO4.n := 0]
 
 # calculate average Ptot value per month per year
-dt.p2 <- dt.p2[, .(Ptot = median(Ptot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand, jaar)]
-# calculate monthly average Ptot
-dt.p2 <- dt.p2[, .(Ptot = median(Ptot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand)]
-# calculate summer average Ptot (march - september)
-dt.p2.median <- dt.p2[maand >= 3 & maand <= 9, .(Ptot.median = median(Ptot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
-dt.p2.sd <- dt.p2[maand >= 3 & maand <= 9, .(Ptot.sd = sd(Ptot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
-dt.p2.n <- dt.p2[!is.na(Ptot) & maand >= 3 & maand <= 9, .(Ptot.n = .N), by = list(mtp_id, mtp_x, mtp_y)]
-
-dt.p <- merge(dt.p, dt.p2.median, by = c("mtp_id", "mtp_x", "mtp_y"), all.x = T, all.y = T)
-dt.p <- merge(dt.p, dt.p2.sd, by = c("mtp_id", "mtp_x", "mtp_y"), all.x = T, all.y = T)
-dt.p <- merge(dt.p, dt.p2.n, by = c("mtp_id", "mtp_x", "mtp_y"), all.x = T)
-dt.p[is.na(Ptot.n), Ptot.n := 0]
-
-dt.p <- dt.p[!is.na(PO4.median) | !is.na(Ptot.median),]
+# dt.p2 <- copy(dt.p)
+# dt.p2 <- dt.p2[, .(Ptot = median(Ptot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand, jaar)]
+# # calculate monthly average Ptot
+# dt.p2 <- dt.p2[, .(Ptot = median(Ptot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand)]
+# # calculate summer average Ptot (march - september)
+# dt.p2.median <- dt.p2[maand >= 3 & maand <= 9, .(Ptot.median = median(Ptot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
+# dt.p2.sd <- dt.p2[maand >= 3 & maand <= 9, .(Ptot.sd = sd(Ptot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
+# dt.p2.n <- dt.p2[!is.na(Ptot) & maand >= 3 & maand <= 9, .(Ptot.n = .N), by = list(mtp_id, mtp_x, mtp_y)]
+# 
+# dt.p <- merge(dt.p, dt.p2.median, by = c("mtp_id", "mtp_x", "mtp_y"), all.x = T, all.y = T)
+# dt.p <- merge(dt.p, dt.p2.sd, by = c("mtp_id", "mtp_x", "mtp_y"), all.x = T, all.y = T)
+# dt.p <- merge(dt.p, dt.p2.n, by = c("mtp_id", "mtp_x", "mtp_y"), all.x = T)
+# dt.p[is.na(Ptot.n), Ptot.n := 0]
+# 
+# dt.p <- dt.p[!is.na(PO4.median) | !is.na(Ptot.median),]
 
 
 ##### Aggregate water quality data --------------------------------
 
 ### nitrogen ----------------------
 
-# calculate winter median (October - February)
-dt.n.wintermedian <- dt.n[maand >= 10 & maand <= 2, .(Ntot.median = median(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
-dt.n.wintersd <- dt.n[maand >= 10 & maand <= 2, .(Ntot.sd = sd(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
-dt.n.wintern <- dt.n[!is.na(Ntot) & maand >= 10 & maand <= 2, .(Ntot.n = .N), by = list(mtp_id, mtp_x, mtp_y)]
-dt.n <- merge(dt.n.median, dt.n.sd, by = c("mtp_id", "mtp_x", "mtp_y"))
-dt.n <- merge(dt.n, dt.n.n, by = c("mtp_id", "mtp_x", "mtp_y"), all.x = T)
-dt.n[is.na(Ntot.n), Ntot.n := 0]
-dt.n <- dt.n[!is.na(Ntot.median),]
-dt.n.year <- dt.n[year(mtp_datum)]
-dt.n.month <- dt.n[month(mtp_datum)]
-
-
-dt.n.wintermedian <- dt.n[maand >= 10 & maand <= 2, .(Ntot.median = median(Ntot, na.rm = TRUE)), by = .(jaar, maand)]
-
-# Create a date column for plotting
-dt.n.wintermedian[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
-
-# Plot the time series for montly sd Ntot
-ggplot(dt.n.wintermedian, aes(x = date, y = dt.n.wintermedian)) +
-  geom_line() + 
-  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
-  labs(title = "Monthly Sd Total Phosphorous", x = "Date", y = "Sd Ptot (mg/L)") + 
-  theme_minimal() + theme(text = element_text(size=20))
-
-# Calculate winter sd 
-# dt.n.sd <- dt.n[maand >= 12 & maand <= 2, .(Ntot.sd = sd(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y)]
-
-# Calculate winter n event > Q3
-
-
-## Calculate summer median (June-August)
-
-# Calculate summer sd
-
-# Calculate summer n events > Q3
-
-
-### Phosphorous ----------------------
-
-## calculate winter median (December - February)
-
-# Calculate winter sd 
-
-# Calculate winter n event > Q3
-
-
-## Calculate summer median (June-August)
-
-# Calculate summer sd
-
-# Calculate summer n events > Q3
-
-
-
-
-# ## Map water quality measurements
-# library(sf)
-# library(tmap)
+# # calculate montly median, sd, n
+# dt.n.median <- dt.n.gw[, .(Ntot.median = median(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand)]
+# dt.p2[, .(Ptot = median(Ptot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand)]
+# merge(dt.n, dt.n.gw, by = c("mtp_id", "mtp_x", "mtp_y"))
+# dt.n.sd <- dt.n.gw[, .(Ntot.sd = sd(Ntot, na.rm = TRUE)), by = list(mtp_id, mtp_x, mtp_y, maand)]
+# dt.n.n <- dt.n.gw[!is.na(Ntot), .(Ntot.n = .N), by = list(mtp_id, mtp_x, mtp_y, maand)]
+# dt.n <- merge(dt.n.median, dt.n.sd, by = c("mtp_id", "mtp_x", "mtp_y"))
+# dt.n <- merge(dt.n.median, dt.n.sd, by = c("mtp_id", "mtp_x", "mtp_y"), allow.cartesian = TRUE)
+# dt.n <- merge(dt.n, dt.n.n, by = c("mtp_id", "mtp_x", "mtp_y"), all.x = T , allow.cartesian = TRUE)
+# dt.n[is.na(Ntot.n), Ntot.n := 0]
+# dt.n <- dt.n[!is.na(Ntot.median),]
+# dt.n.year <- dt.n[year(mtp_datum)]
+# dt.n.month <- dt.n[month(mtp_datum)]
 # 
-# ## SF
-# pointSF <- sf:: st_as_sf(dt, coords = c("mtp_x", "mtp_y"), crs = 4326)
-# class(pointSF)
-# tmap::qtm(pointSF)
-# View(pointSF)
 # 
-# #write out the file
-# sf::st_write(pointSF, paste0(baseDir, "/outputs/Surfacewatercoords.shp"))
-# head(dt)
+# dt.n.wintermedian <- dt.n[maand >= 10 & maand <= 2, .(Ntot.median = median(Ntot, na.rm = TRUE)), by = .(jaar, maand)]
+# 
+# # Create a date column for plotting
+# dt.n.wintermedian[, date := as.Date(paste(jaar, maand, "01", sep = "-"))]
+# 
+# # Plot the time series for montly sd Ntot
+# ggplot(dt.n.wintermedian, aes(x = date, y = dt.n.wintermedian)) +
+#   geom_line() + 
+#   scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+#   labs(title = "Monthly Sd Total Phosphorous", x = "Date", y = "Sd Ptot (mg/L)") + 
+#   theme_minimal() + theme(text = element_text(size=20))
+
+# provincies NL
+prov <- st_read('provinciegrenzen/2018-Imergis_provinciegrenzen_kustlijn.shp')
+
+# location of the water regions selected by Tessa
+grouped_polygons <- st_read('grouped_polygons.gpkg')
+
+all.sw.points <- st_read("sw.coords.gpkg")
+all.gw.points <- st_read("gw.coords.gpkg")
+
+require(ggplot2)
+require(patchwork)
+
+p1 <- ggplot() + 
+  geom_sf(data = prov, color = 'black', fill = NA) +
+  #geom_sf(data = grouped_polygons, color = 'grey26', fill = 'grey') +
+  geom_sf(data = all.sw.points, color = 'red', fill = 'red', size = 1) + 
+  theme_bw() + ggtitle("All Surface Water Measurements") +
+  theme(text = element_text(size=20))
+
+p2 <- ggplot() + 
+  geom_sf(data = prov, color = 'black', fill = NA) +
+  #geom_sf(data = grouped_polygons, color = 'grey26', fill = 'grey') +
+  geom_sf(data = all.gw.points, color = 'red', fill = 'red', size = 1) + 
+  theme_bw() + ggtitle("All Groundwater Measurements") +
+  theme(text = element_text(size=20))
+
+p3 = p1+p2
+
+ggsave(plot = p3,filename = 'products/plot_all_measurements.png',width = 14,height = 8)
 
 
-require(sf)
-require(dplyr)
-
-# Convert data to sf object (assuming coordinates are in columns "mtp_x.index" and "mtp_y.index")
-loc.gw_clean <- loc.gw[!is.na(mtp_x) & !is.na(mtp_y)]
-
-subset_loc.gw <- loc.gw_clean
-subset_loc.gw <- subset_loc.gw[,.(mtp_x,mtp_y,mtp_naam)]
-subset_loc.gw <- subset_loc.gw[!duplicated(mtp_x)]
-subset_loc.gw[,value := rnorm(.N,mean=10,sd=2.5)]
-
-# Convert to sf object
-points_sf <- st_as_sf(subset_loc.gw, coords = c("mtp_x", "mtp_y"), crs = 28992)
-
-
-View(subset_loc.gw)
-# # Convert to SF object -------------------
-# sf.n <- st_as_sf(dt.n, coords = c("mtp_x", "mtp_y"), crs = 28992)
-# sf.p <- st_as_sf(dt.p, coords = c("mtp_x", "mtp_y"), crs = 28992)
-# st_write(sf.n, "C:/Users/Tldek/Documents/MES/MSc Thesis/Outputs/Interpolation/Nitrogen_winter.gpkg")
-# st_write(sf.p, "C:/Users/Tldek/Documents/MES/MSc Thesis/Outputs/Phosphorous_winter.gpkg")
-# 
-# # Create rasters for interesting values -----------------------------------
-# st.mask <- st_as_stars(mask)
-# st.mask <- st_warp(st.mask, cellsize = 250, crs = 28992)
-# 
-# idw.n.median <- gstat::idw(Ntot.median ~ 1, sf.n, newdata = st.mask, idp = 2.0, nmax = 10, debug.level = -1)
-# write_stars(idw.n.median, paste0(onedrive, "project/NMI_bodemschat/products/wk_interpolation/wk_ntot_median.tif"))
-# 
-# idw.n.sd <- gstat::idw(Ntot.sd ~ 1, sf.n, newdata = st.mask, idp = 2.0, nmax = 10, debug.level = -1)
-# write_stars(idw.n.sd, paste0(onedrive, "project/NMI_bodemschat/products/wk_interpolation/wk_ntot_sd.tif"))
-# 
-# idw.p.median <- gstat::idw(PO4.median ~ 1, sf.p, newdata = st.mask, idp = 2.0, nmax = 10, debug.level = -1)
-# write_stars(idw.p.median, paste0(onedrive, "project/NMI_bodemschat/products/wk_interpolation/wk_po4_median.tif"))
-# 
-# idw.p.sd <- gstat::idw(PO4.sd ~ 1, sf.p, newdata = st.mask, idp = 2.0, nmax = 10, debug.level = -1)
-# write_stars(idw.p.sd, paste0(onedrive, "project/NMI_bodemschat/products/wk_interpolation/wk_po4_sd.tif"))
-# 
-# #}
-# 
-# addWaterKwaliteit <- function (fields, onedrive) {
-#   
-#   # Drop irrelevant columns for this function
-#   fields <- fields[, "id"]
-#   
-#   # Create centroids of fields
-#   points <- st_centroid(fields, of_largest_polygon = TRUE)
-#   
-#   # Setup table to list results
-#   dt.wk <- data.table(id = fields$id)
-#   
-#   # Extract Ntot.median and insert into table
-#   r.wk.ntot.median <- raster(paste0(onedrive, "project/NMI_Bodemschat/products/wk_interpolation/wk_ntot_median.tif"))
-#   this.wk.ntot.median <- extract(r.wk.ntot.median , points, df = TRUE)
-#   setnames(this.wk.ntot.median , c("ID", "wk_ntot_median"), c("id", "wk.ntot.median"))
-#   dt.wk <- merge(dt.wk, this.wk.ntot.median, by = "id", all.x = TRUE)
-#   
-#   # Extract Ntot.sd and insert into table
-#   r.wk.ntot.sd <- raster(paste0(onedrive, "project/NMI_Bodemschat/products/wk_interpolation/wk_ntot_sd.tif"))
-#   this.wk.ntot.sd <- extract(r.wk.ntot.sd , points, df = TRUE)
-#   setnames(this.wk.ntot.sd , c("ID", "wk_ntot_sd"), c("id", "wk.ntot.sd"))
-#   dt.wk <- merge(dt.wk, this.wk.ntot.sd, by = "id", all.x = TRUE)
-#   
-#   # Extract po4.median and insert into table
-#   r.wk.po4.median <- raster(paste0(onedrive, "project/NMI_Bodemschat/products/wk_interpolation/wk_po4_median.tif"))
-#   this.wk.po4.median <- extract(r.wk.po4.median , points, df = TRUE)
-#   setnames(this.wk.po4.median , c("ID", "wk_po4_median"), c("id", "wk.po4.median"))
-#   dt.wk <- merge(dt.wk, this.wk.po4.median, by = "id", all.x = TRUE)
-#   
-#   # Extract po4.sd and insert into table
-#   r.wk.po4.sd <- raster(paste0(onedrive, "project/NMI_Bodemschat/products/wk_interpolation/wk_po4_sd.tif"))
-#   this.wk.po4.sd <- extract(r.wk.po4.sd , points, df = TRUE)
-#   setnames(this.wk.po4.sd , c("ID", "wk_po4_sd"), c("id", "wk.po4.sd"))
-#   dt.wk <- merge(dt.wk, this.wk.po4.sd, by = "id", all.x = TRUE)
-#   
-#   # Replace outliers
-#   dt.wk[wk.ntot.sd > 15, wk.ntot.sd := 15]
-#   dt.wk[wk.po4.sd > 4, wk.po4.sd := 4]
-#   
-#   # Merge waterkwaliteit data to the fields
-#   fields <- merge(fields, dt.wk, by = "id", all.x = TRUE)
-#   
-#   return(fields)
-# }
